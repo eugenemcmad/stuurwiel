@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package stuurwiel.v1;
+
+option go_package = "stuurwiel/api/grpc/stuurwiel/v1;stuurwielv1";
+
+// MessageService publishes domain messages to a chosen broker.
+service MessageService {
+  rpc Publish(PublishRequest) returns (PublishResponse);
+}
+
+message PublishRequest {
+  // Target broker: "nats", "kafka", or "rabbitmq".
+  string broker = 1;
+  int64 event_id = 2;
+  string text = 3;
+}
+
+message PublishResponse {
+  string broker = 1;
+  int32 bytes_written = 2;
+}

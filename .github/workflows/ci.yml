@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check (fmt, tidy, vet, test)
+        run: make check
+      - name: API lint (buf)
+        run: make api-lint
+      - name: Race tests
+        run: make test-race
+
+  k8s:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+      - name: Validate Kubernetes manifests
+        run: make k8s-validate
+
+  nomad:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Nomad CLI
+        uses: hashicorp/setup-nomad@v1
+        with:
+          version: "1.8.4"
+      - name: Validate Nomad job
+        run: make nomad-validate

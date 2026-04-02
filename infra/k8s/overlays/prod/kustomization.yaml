@@ -1,0 +1,10 @@
+# Production: compose patches, image pins, and stricter resources here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+# Example — pin the app image after pushing to a registry:
+# images:
+#   - name: stuurwiel
+#     newName: ghcr.io/your-org/stuurwiel
+#     newTag: "1.0.0"

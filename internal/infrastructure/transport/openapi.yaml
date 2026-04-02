@@ -1,0 +1,47 @@
+openapi: 3.0.3
+info:
+  title: Stuurwiel HTTP API
+  version: "1"
+  description: Publish JSON messages to NATS, Kafka, or RabbitMQ.
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /v1/publish/{broker}:
+    post:
+      summary: Publish a message
+      parameters:
+        - name: broker
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [nats, kafka, rabbitmq]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Msg"
+      responses:
+        "204":
+          description: Published (no body)
+        "400":
+          description: Unknown broker or invalid message
+        "502":
+          description: Broker unavailable
+components:
+  schemas:
+    Msg:
+      type: object
+      required: [event_id, text]
+      properties:
+        event_id:
+          type: integer
+          format: int64
+          minimum: 0
+        text:
+          type: string

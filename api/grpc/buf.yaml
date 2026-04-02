@@ -1,0 +1,9 @@
+# https://buf.build/docs/lint/overview
+version: v1
+lint:
+  use:
+    - STANDARD
+# WIRE catches incompatible proto changes without failing on file renames/moves (FILE would).
+breaking:
+  use:
+    - WIRE

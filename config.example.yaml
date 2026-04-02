@@ -1,0 +1,28 @@
+# Copy to config.yaml in the repo root (or set CONFIG_PATH).
+# Precedence: defaults < this file < environment variables.
+
+log_level: info
+
+nats_url: nats://127.0.0.1:4222
+nats_subject: stuurwiel.messages
+nats_queue_group: stuurwiel-relay
+
+kafka_brokers:
+  - 127.0.0.1:9092
+kafka_topic: stuurwiel-messages
+kafka_group_id: stuurwiel-relay
+
+rabbit_url: amqp://guest:guest@127.0.0.1:5672/
+rabbit_queue: stuurwiel.messages
+
+forward_probability: 0.55
+worker_concurrency: 10
+
+http_addr: ":8080"
+grpc_addr: ":9090"
+
+# Workers: exponential backoff for dial failures and after a session ends.
+reconnect_initial_delay: 2s
+reconnect_max_delay: 1m
+reconnect_jitter_max: 100ms
+max_reconnect_attempts: 10

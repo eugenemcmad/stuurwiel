@@ -1,0 +1,11 @@
+# Non-secret defaults shared by api and workers (same as docker-compose wiring).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stuurwiel-brokers
+data:
+  NATS_URL: "nats://nats:4222"
+  KAFKA_BROKERS: "kafka:29092"
+  NATS_SUBJECT: "stuurwiel.messages"
+  KAFKA_TOPIC: "stuurwiel-messages"
+  RABBIT_QUEUE: "stuurwiel.messages"

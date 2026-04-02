@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-nats-kafka
+spec:
+  revisionHistoryLimit: 2
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-nats-kafka
+  template:
+    metadata:
+      labels:
+        app: worker-nats-kafka
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: worker
+          image: stuurwiel:local
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/worker-nats-kafka"]
+          securityContext:
+            allowPrivilegeEscalation: false
+          envFrom:
+            - configMapRef:
+                name: stuurwiel-brokers
+            - secretRef:
+                name: stuurwiel-secrets
+          env:
+            - name: LOG_LEVEL
+              value: "info"
+            - name: FORWARD_PROBABILITY
+              value: "0.55"
+            - name: WORKER_CONCURRENCY
+              value: "10"
+            - name: NATS_QUEUE_GROUP
+              value: "stuurwiel-worker-nats-kafka"
+            - name: RECONNECT_INITIAL_DELAY
+              value: "2s"
+            - name: RECONNECT_MAX_DELAY
+              value: "2m"
+            - name: RECONNECT_JITTER_MAX
+              value: "50ms"
+            - name: MAX_RECONNECT_ATTEMPTS
+              value: "100"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi

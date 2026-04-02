@@ -1,0 +1,29 @@
+### Health check
+GET http://{{host}}/healthz
+
+### Publish to NATS
+POST http://{{host}}/v1/publish/nats
+Content-Type: application/json
+
+{
+  "event_id": 1010,
+  "text": "hello NATS"
+}
+
+### Publish to Kafka
+POST http://{{host}}/v1/publish/kafka
+Content-Type: application/json
+
+{
+  "event_id": 2020,
+  "text": "hello Kafka"
+}
+
+### Publish to RabbitMQ
+POST http://{{host}}/v1/publish/rabbitmq
+Content-Type: application/json
+
+{
+  "event_id": 3030,
+  "text": "hello RabbitMQ"
+}
