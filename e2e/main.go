@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 
 	stuurwielv1 "stuurwiel/api/grpc/stuurwiel/v1"
 	"stuurwiel/internal/domain"
@@ -49,6 +51,7 @@ func main() {
 }
 
 func run() int {
+	exitCode := 0
 	httpBase := flag.String("http", envOr("E2E_HTTP", "http://127.0.0.1:8080"), "REST base URL (no trailing slash)")
 	grpcAddr := flag.String("grpc", envOr("E2E_GRPC", "127.0.0.1:9090"), "gRPC host:port")
 	wait := flag.Duration("wait", 5*time.Minute, "wait until GET /healthz OK and gRPC TCP up (0 = skip)")
@@ -70,6 +73,7 @@ func run() int {
 		defer func() {
 			if err := dockerCompose(composeDirClean, "down"); err != nil {
 				log.Printf("docker compose down: %v", err)
+				exitCode = 1
 			}
 		}()
 	}
@@ -87,7 +91,11 @@ func run() int {
 		log.Printf("grpc dial: %v", err)
 		return 1
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("grpc conn close: %v", err)
+		}
+	}()
 	gcli := stuurwielv1.NewMessageServiceClient(conn)
 
 	httpClient := &http.Client{Timeout: 60 * time.Second}
@@ -125,15 +133,38 @@ func run() int {
 		}
 	}
 
+	// Keep e2e focused but cover a few critical negative paths.
+	if err := assertUnknownBrokerREST(ctx, httpClient, *httpBase); err != nil {
+		log.Printf("REST unknown broker: %v", err)
+		failed++
+	} else {
+		log.Printf("ok REST unknown broker rejected with 400")
+	}
+	if err := assertInvalidJSONREST(ctx, httpClient, *httpBase); err != nil {
+		log.Printf("REST invalid json: %v", err)
+		failed++
+	} else {
+		log.Printf("ok REST invalid json rejected with 400")
+	}
+	if err := assertUnknownBrokerGRPC(ctx, gcli); err != nil {
+		log.Printf("gRPC unknown broker: %v", err)
+		failed++
+	} else {
+		log.Printf("ok gRPC unknown broker rejected with InvalidArgument")
+	}
+
 	if failed > 0 {
 		log.Printf("e2e finished with %d error(s)", failed)
 		return 1
 	}
 	log.Printf("e2e: all %d publishes succeeded", totalPublishCount())
 	if *observeAfter > 0 {
-		observeRelay(*observeAfter, composeDirClean, *streamWorkers)
+		if err := observeRelay(*observeAfter, composeDirClean, *streamWorkers); err != nil {
+			log.Printf("e2e: observe failed: %v", err)
+			return 1
+		}
 	}
-	return 0
+	return exitCode
 }
 
 func dockerCompose(dir string, args ...string) error {
@@ -146,13 +177,13 @@ func dockerCompose(dir string, args ...string) error {
 }
 
 // observeRelay streams worker container logs or sleeps for the observe window.
-func observeRelay(d time.Duration, composeDir string, streamWorkers bool) {
+func observeRelay(d time.Duration, composeDir string, streamWorkers bool) error {
 	composeDir = filepath.Clean(composeDir)
 	if !streamWorkers {
 		log.Printf("e2e: waiting %s (--stream-workers=false; relay logs only in docker)", d)
 		time.Sleep(d)
 		log.Printf("e2e: observe window finished")
-		return
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), d)
 	defer cancel()
@@ -165,13 +196,13 @@ func observeRelay(d time.Duration, composeDir string, streamWorkers bool) {
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		log.Printf("e2e: observe window finished")
-		return
+		return nil
 	}
 	if err != nil {
-		log.Printf("e2e: docker compose logs failed (%v) — run from repo root or -compose-dir; sleeping %s", err, d)
-		time.Sleep(d)
+		return fmt.Errorf("docker compose logs failed: %w", err)
 	}
 	log.Printf("e2e: observe window finished")
+	return nil
 }
 
 func envDuration(key string, def time.Duration) time.Duration {
@@ -229,8 +260,12 @@ func waitReady(httpBase, grpcAddr string, total time.Duration) error {
 		}
 		resp, err := client.Do(req)
 		if err == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			if _, copyErr := io.Copy(io.Discard, resp.Body); copyErr != nil {
+				log.Printf("wait: read healthz body: %v", copyErr)
+			}
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Printf("wait: close healthz body: %v", closeErr)
+			}
 			if resp.StatusCode == http.StatusOK {
 				e2 := dialOnce(grpcAddr)
 				if e2 == nil {
@@ -303,9 +338,75 @@ func postRESTOnce(ctx context.Context, client *http.Client, base, broker string,
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("postRESTOnce: close response body: %v", closeErr)
+		}
+	}()
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("HTTP %s", resp.Status)
+	}
+	return nil
+}
+
+func assertUnknownBrokerREST(ctx context.Context, client *http.Client, base string) error {
+	body := []byte(`{"event_id":1,"text":"bad broker"}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/publish/unknown", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("assertUnknownBrokerREST: close response body: %v", closeErr)
+		}
+	}()
+	if resp.StatusCode != http.StatusBadRequest {
+		return fmt.Errorf("unexpected status for unknown broker: %s", resp.Status)
+	}
+	return nil
+}
+
+func assertInvalidJSONREST(ctx context.Context, client *http.Client, base string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/publish/nats", strings.NewReader(`not json`))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("assertInvalidJSONREST: close response body: %v", closeErr)
+		}
+	}()
+	if resp.StatusCode != http.StatusBadRequest {
+		return fmt.Errorf("unexpected status for invalid json: %s", resp.Status)
+	}
+	return nil
+}
+
+func assertUnknownBrokerGRPC(ctx context.Context, cli stuurwielv1.MessageServiceClient) error {
+	_, err := cli.Publish(ctx, &stuurwielv1.PublishRequest{
+		Broker:  "unknown",
+		EventId: 1,
+		Text:    "bad broker",
+	})
+	if err == nil {
+		return fmt.Errorf("expected invalid argument error")
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return fmt.Errorf("unexpected grpc error type: %v", err)
+	}
+	if st.Code() != codes.InvalidArgument {
+		return fmt.Errorf("unexpected grpc code: %s", st.Code())
 	}
 	return nil
 }

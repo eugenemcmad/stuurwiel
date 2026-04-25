@@ -58,3 +58,22 @@ jobs:
           version: "1.8.4"
       - name: Validate Nomad job
         run: make nomad-validate
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start compose stack
+        run: docker compose up -d --wait
+      - name: Run integration tests
+        run: make test-integration
+      - name: Stop compose stack
+        if: always()
+        run: docker compose down -v
